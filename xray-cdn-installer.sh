@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Xray-Edge-Tunnel - Complete Management Script
+# Xray-Edge-Tunnel - Complete Management Script with xhttp Support
 # Installation, Configuration, and Management Tool
 
 set -euo pipefail
@@ -71,7 +71,7 @@ print_banner() {
     clear
     echo -e "${CYAN}"
     echo "╔═══════════════════════════════════════════════════╗"
-    echo "║          Xray-Edge-Tunnel Manager v2.0           ║"
+    echo "║       Xray-Edge-Tunnel Manager v2.1 xhttp        ║"
     echo "║        Complete Installation & Management        ║"
     echo "╚═══════════════════════════════════════════════════╝"
     echo -e "${NC}"
@@ -151,6 +151,14 @@ install_xray_binary() {
     if ! command -v xray &> /dev/null; then
         error_exit "Failed to install Xray" 3
         return 1
+    fi
+    
+    # Configure Xray service to run as root
+    if [[ -f /etc/systemd/system/xray.service ]]; then
+        sed -i 's/^User=nobody/User=root/' /etc/systemd/system/xray.service
+        sed -i 's/^User=nobody/User=root/' /lib/systemd/system/xray.service 2>/dev/null || true
+        systemctl daemon-reload
+        print_msg "Xray service configured to run as root"
     fi
     
     print_msg "Xray installed: $(xray version | head -n1)"
@@ -289,16 +297,70 @@ get_config() {
         return 1
     fi
     
-    # WebSocket Path
+    # Transport Protocol Selection
     echo ""
-    read -p "$(echo -e ${YELLOW}WebSocket Path ${GREEN}\(default: /graphql\)${NC}: )" WS_PATH
-    WS_PATH=${WS_PATH:-/graphql}
-    [[ "$WS_PATH" != /* ]] && WS_PATH="/$WS_PATH"
-    print_msg "Path: $WS_PATH"
+    echo -e "${YELLOW}Select Transport Protocol:${NC}"
+    echo -e "  ${GREEN}1)${NC} xhttp (Recommended - Modern HTTP/3)"
+    echo -e "  ${GREEN}2)${NC} WebSocket (ws) - Traditional"
+    echo ""
+    read -p "$(echo -e ${YELLOW}Choice ${GREEN}[1-2]${NC}: )" TRANSPORT_CHOICE
+    
+    case "$TRANSPORT_CHOICE" in
+        1)
+            TRANSPORT="xhttp"
+            print_msg "Transport: xhttp"
+            ;;
+        2)
+            TRANSPORT="ws"
+            print_msg "Transport: WebSocket"
+            ;;
+        *)
+            TRANSPORT="xhttp"
+            print_warning "Invalid choice, using xhttp"
+            ;;
+    esac
+    
+    # Path configuration
+    echo ""
+    if [[ "$TRANSPORT" == "xhttp" ]]; then
+        read -p "$(echo -e ${YELLOW}Path ${GREEN}\(default: /\)${NC}: )" XHTTP_PATH
+        XHTTP_PATH=${XHTTP_PATH:-/}
+        [[ "$XHTTP_PATH" != /* ]] && XHTTP_PATH="/$XHTTP_PATH"
+        print_msg "Path: $XHTTP_PATH"
+        
+        # Set WS_PATH to empty for xhttp
+        WS_PATH=""
+        
+        # xhttp mode
+        echo ""
+        echo -e "${YELLOW}Select xhttp Mode:${NC}"
+        echo -e "  ${GREEN}1)${NC} packet-up (Recommended)"
+        echo -e "  ${GREEN}2)${NC} stream-up"
+        echo -e "  ${GREEN}3)${NC} stream-one"
+        echo ""
+        read -p "$(echo -e ${YELLOW}Choice ${GREEN}[1-3]${NC}: )" MODE_CHOICE
+        
+        case "$MODE_CHOICE" in
+            1) XHTTP_MODE="packet-up" ;;
+            2) XHTTP_MODE="stream-up" ;;
+            3) XHTTP_MODE="stream-one" ;;
+            *) XHTTP_MODE="packet-up" ;;
+        esac
+        print_msg "Mode: $XHTTP_MODE"
+    else
+        read -p "$(echo -e ${YELLOW}WebSocket Path ${GREEN}\(default: /graphql\)${NC}: )" WS_PATH
+        WS_PATH=${WS_PATH:-/graphql}
+        [[ "$WS_PATH" != /* ]] && WS_PATH="/$WS_PATH"
+        print_msg "Path: $WS_PATH"
+        
+        # Set xhttp variables to empty for ws
+        XHTTP_PATH=""
+        XHTTP_MODE=""
+    fi
     
     # CDN Host
     echo ""
-    read -p "$(echo -e ${YELLOW}CDN Host ${GREEN}\(default: chatgpt.com\)${NC}: )" CDN_HOST
+    read -p "$(echo -e ${YELLOW}CDN Host/Camouflage ${GREEN}\(default: chatgpt.com\)${NC}: )" CDN_HOST
     CDN_HOST=${CDN_HOST:-chatgpt.com}
     print_msg "CDN Host: $CDN_HOST"
     
@@ -309,14 +371,58 @@ get_config() {
     PORT=${PORT:-443}
     print_msg "Port: $PORT"
     
+    # ALPN Configuration
+    echo ""
+    echo -e "${YELLOW}Select ALPN Protocol:${NC}"
+    echo -e "  ${GREEN}1)${NC} h2 (HTTP/2 - Recommended)"
+    echo -e "  ${GREEN}2)${NC} http/1.1"
+    echo -e "  ${GREEN}3)${NC} h2,http/1.1 (Both)"
+    echo ""
+    read -p "$(echo -e ${YELLOW}Choice ${GREEN}[1-3]${NC}: )" ALPN_CHOICE
+    
+    case "$ALPN_CHOICE" in
+        1) ALPN="h2" ;;
+        2) ALPN="http/1.1" ;;
+        3) ALPN="h2,http/1.1" ;;
+        *) ALPN="h2" ;;
+    esac
+    print_msg "ALPN: $ALPN"
+    
+    # Fingerprint
+    echo ""
+    echo -e "${YELLOW}Select TLS Fingerprint:${NC}"
+    echo -e "  ${GREEN}1)${NC} chrome (Recommended)"
+    echo -e "  ${GREEN}2)${NC} firefox"
+    echo -e "  ${GREEN}3)${NC} safari"
+    echo -e "  ${GREEN}4)${NC} random"
+    echo ""
+    read -p "$(echo -e ${YELLOW}Choice ${GREEN}[1-4]${NC}: )" FP_CHOICE
+    
+    case "$FP_CHOICE" in
+        1) FINGERPRINT="chrome" ;;
+        2) FINGERPRINT="firefox" ;;
+        3) FINGERPRINT="safari" ;;
+        4) FINGERPRINT="random" ;;
+        *) FINGERPRINT="chrome" ;;
+    esac
+    print_msg "Fingerprint: $FINGERPRINT"
+    
     # Summary
     echo ""
     echo -e "${BLUE}Configuration Summary:${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "Domain:      ${GREEN}$DOMAIN${NC}"
-    echo -e "Path:        ${GREEN}$WS_PATH${NC}"
+    echo -e "Transport:   ${GREEN}$TRANSPORT${NC}"
+    if [[ "$TRANSPORT" == "xhttp" ]]; then
+        echo -e "Path:        ${GREEN}$XHTTP_PATH${NC}"
+        echo -e "Mode:        ${GREEN}$XHTTP_MODE${NC}"
+    else
+        echo -e "Path:        ${GREEN}$WS_PATH${NC}"
+    fi
     echo -e "CDN Host:    ${GREEN}$CDN_HOST${NC}"
     echo -e "Port:        ${GREEN}$PORT${NC}"
+    echo -e "ALPN:        ${GREEN}$ALPN${NC}"
+    echo -e "Fingerprint: ${GREEN}$FINGERPRINT${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
     
@@ -326,9 +432,14 @@ get_config() {
     # Save configuration
     cat > "$SCRIPT_CONFIG" <<EOF
 DOMAIN="$DOMAIN"
-WS_PATH="$WS_PATH"
+TRANSPORT="$TRANSPORT"
+WS_PATH="${WS_PATH:-}"
+XHTTP_PATH="${XHTTP_PATH:-}"
+XHTTP_MODE="${XHTTP_MODE:-}"
 CDN_HOST="$CDN_HOST"
 PORT="$PORT"
+ALPN="$ALPN"
+FINGERPRINT="$FINGERPRINT"
 IPV4="$IPV4"
 IPV6="$IPV6"
 EOF
@@ -348,8 +459,50 @@ stop_services() {
     print_msg "Port 80 ready"
 }
 
-# Get SSL certificate
+# Get SSL certificate with improved handling
 get_ssl() {
+    print_info "SSL Certificate Configuration for $DOMAIN..."
+    echo ""
+    
+    # Check if domain is .ir
+    IS_IR_DOMAIN=false
+    if [[ "$DOMAIN" =~ \.ir$ ]]; then
+        IS_IR_DOMAIN=true
+        print_warning "Detected .ir domain - Special handling required"
+    fi
+    
+    echo -e "${YELLOW}SSL Certificate Options:${NC}"
+    echo -e "  ${GREEN}1)${NC} Auto-obtain certificate with Certbot (Let's Encrypt)"
+    echo -e "  ${GREEN}2)${NC} I already have certificates (provide paths)"
+    echo -e "  ${GREEN}3)${NC} Skip SSL (not recommended)"
+    echo ""
+    read -p "$(echo -e ${YELLOW}Choice ${GREEN}[1-3]${NC}: )" SSL_CHOICE
+    
+    case "$SSL_CHOICE" in
+        1)
+            # Auto-obtain certificate
+            obtain_ssl_auto
+            SSL_METHOD="auto"
+            ;;
+        2)
+            # Use existing certificates
+            obtain_ssl_manual
+            SSL_METHOD="manual"
+            ;;
+        3)
+            print_warning "Proceeding without SSL (insecure!)"
+            SSL_METHOD="none"
+            return 0
+            ;;
+        *)
+            print_error "Invalid choice"
+            return 1
+            ;;
+    esac
+}
+
+# Auto-obtain SSL certificate
+obtain_ssl_auto() {
     print_info "Obtaining SSL certificate for $DOMAIN..."
     
     stop_services
@@ -361,23 +514,11 @@ get_ssl() {
         if [[ -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]]; then
             print_msg "SSL certificate obtained"
             
-            # Fix permissions for Xray to read certificates
-            print_info "Setting certificate permissions..."
-            chmod 755 /etc/letsencrypt/live
-            chmod 755 /etc/letsencrypt/archive
-            chmod 755 "/etc/letsencrypt/live/$DOMAIN"
-            chmod 755 "/etc/letsencrypt/archive/$DOMAIN"
-            chmod 644 "/etc/letsencrypt/live/$DOMAIN/fullchain.pem"
-            chmod 644 "/etc/letsencrypt/live/$DOMAIN/chain.pem"
-            chmod 600 "/etc/letsencrypt/live/$DOMAIN/privkey.pem"
+            CERT_FILE="/etc/letsencrypt/live/$DOMAIN/fullchain.pem"
+            KEY_FILE="/etc/letsencrypt/live/$DOMAIN/privkey.pem"
             
-            # Allow Xray user to read certificates
-            if id nobody &>/dev/null; then
-                chgrp -R nobody "/etc/letsencrypt/live/$DOMAIN"
-                chgrp -R nobody "/etc/letsencrypt/archive/$DOMAIN"
-            fi
-            
-            print_msg "Certificate permissions configured"
+            # Fix permissions
+            setup_cert_permissions
         else
             error_exit "Certificate files not found" 4
             return 1
@@ -386,6 +527,96 @@ get_ssl() {
         error_exit "Failed to obtain SSL certificate. Check DNS and port 80" 4
         return 1
     fi
+}
+
+# Use existing SSL certificates
+obtain_ssl_manual() {
+    echo ""
+    print_info "Please provide your certificate paths"
+    echo ""
+    
+    while true; do
+        read -p "$(echo -e ${YELLOW}Full certificate path ${GREEN}\(fullchain.pem\)${NC}: )" CERT_FILE
+        
+        if [[ ! -f "$CERT_FILE" ]]; then
+            print_error "Certificate file not found: $CERT_FILE"
+            continue
+        fi
+        
+        if ! openssl x509 -in "$CERT_FILE" -noout 2>/dev/null; then
+            print_error "Invalid certificate file"
+            continue
+        fi
+        
+        print_msg "Certificate: $CERT_FILE"
+        break
+    done
+    
+    while true; do
+        read -p "$(echo -e ${YELLOW}Private key path ${GREEN}\(privkey.pem\)${NC}: )" KEY_FILE
+        
+        if [[ ! -f "$KEY_FILE" ]]; then
+            print_error "Private key file not found: $KEY_FILE"
+            continue
+        fi
+        
+        if ! openssl rsa -in "$KEY_FILE" -check -noout 2>/dev/null; then
+            print_error "Invalid private key file"
+            continue
+        fi
+        
+        print_msg "Private Key: $KEY_FILE"
+        break
+    done
+    
+    # Verify certificate and key match
+    CERT_MODULUS=$(openssl x509 -noout -modulus -in "$CERT_FILE" 2>/dev/null | openssl md5)
+    KEY_MODULUS=$(openssl rsa -noout -modulus -in "$KEY_FILE" 2>/dev/null | openssl md5)
+    
+    if [[ "$CERT_MODULUS" != "$KEY_MODULUS" ]]; then
+        error_exit "Certificate and private key do not match!" 4
+        return 1
+    fi
+    
+    print_msg "Certificate and key validated"
+    
+    # Copy certificates to standard location
+    CERT_DIR="/etc/xray-ssl/$DOMAIN"
+    mkdir -p "$CERT_DIR"
+    cp "$CERT_FILE" "$CERT_DIR/fullchain.pem"
+    cp "$KEY_FILE" "$CERT_DIR/privkey.pem"
+    
+    CERT_FILE="$CERT_DIR/fullchain.pem"
+    KEY_FILE="$CERT_DIR/privkey.pem"
+    
+    setup_cert_permissions
+}
+
+# Setup certificate permissions
+setup_cert_permissions() {
+    print_info "Setting certificate permissions..."
+    
+    # Set permissions for Xray to read certificates
+    chmod 755 "$(dirname "$(dirname "$CERT_FILE")")" 2>/dev/null || true
+    chmod 755 "$(dirname "$CERT_FILE")"
+    chmod 644 "$CERT_FILE"
+    chmod 644 "$KEY_FILE"
+    
+    # If using Let's Encrypt, also set archive permissions
+    if [[ "$CERT_FILE" == *"letsencrypt"* ]]; then
+        chmod 755 /etc/letsencrypt
+        chmod 755 /etc/letsencrypt/live
+        chmod 755 /etc/letsencrypt/archive
+        if [[ -d "/etc/letsencrypt/live/$DOMAIN" ]]; then
+            chmod 755 "/etc/letsencrypt/live/$DOMAIN"
+        fi
+        if [[ -d "/etc/letsencrypt/archive/$DOMAIN" ]]; then
+            chmod 755 "/etc/letsencrypt/archive/$DOMAIN"
+            chmod 644 "/etc/letsencrypt/archive/$DOMAIN"/*.pem 2>/dev/null || true
+        fi
+    fi
+    
+    print_msg "Certificate permissions configured"
 }
 
 # Generate Xray configuration
@@ -400,6 +631,85 @@ generate_config() {
     mkdir -p "$XRAY_CONFIG_DIR"
     [[ -f "$XRAY_CONFIG_FILE" ]] && cp "$XRAY_CONFIG_FILE" "${XRAY_CONFIG_FILE}.backup.$(date +%Y%m%d_%H%M%S)"
     
+    # Build ALPN array
+    IFS=',' read -ra ALPN_ARRAY <<< "$ALPN"
+    ALPN_JSON=$(printf '%s\n' "${ALPN_ARRAY[@]}" | jq -R . | jq -s -c .)
+    
+    # Generate configuration based on transport
+    if [[ "$TRANSPORT" == "xhttp" ]]; then
+        generate_xhttp_config
+    else
+        generate_ws_config
+    fi
+    
+    # Verify JSON
+    if ! jq empty "$XRAY_CONFIG_FILE" 2>/dev/null; then
+        if ! python3 -c "import json; json.load(open('$XRAY_CONFIG_FILE'))" 2>/dev/null; then
+            print_warning "Could not validate JSON syntax"
+        fi
+    fi
+    
+    # Save client info
+    mkdir -p "$(dirname "$CLIENTS_FILE")"
+    echo "# Xray Clients - $(date)" > "$CLIENTS_FILE"
+    echo "Xray-Edge-Tunnel|$UUID|Default Client|$(date +%Y-%m-%d)|$TRANSPORT" >> "$CLIENTS_FILE"
+    
+    print_msg "Configuration created"
+}
+
+# Generate xhttp configuration
+generate_xhttp_config() {
+    cat > "$XRAY_CONFIG_FILE" <<EOF
+{
+  "log": {
+    "loglevel": "warning"
+  },
+  "inbounds": [
+    {
+      "port": ${PORT},
+      "protocol": "vless",
+      "settings": {
+        "clients": [
+          {
+            "id": "${UUID}"
+          }
+        ],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "security": "tls",
+        "tlsSettings": {
+          "serverName": "${DOMAIN}",
+          "certificates": [
+            {
+              "certificateFile": "${CERT_FILE}",
+              "keyFile": "${KEY_FILE}"
+            }
+          ],
+          "alpn": ${ALPN_JSON},
+          "fingerprint": "${FINGERPRINT}"
+        },
+        "xhttpSettings": {
+          "path": "${XHTTP_PATH}",
+          "host": "${DOMAIN}",
+          "mode": "${XHTTP_MODE}"
+        }
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "protocol": "freedom",
+      "tag": "direct"
+    }
+  ]
+}
+EOF
+}
+
+# Generate WebSocket configuration
+generate_ws_config() {
     cat > "$XRAY_CONFIG_FILE" <<EOF
 {
   "log": {
@@ -424,13 +734,18 @@ generate_config() {
           "serverName": "${DOMAIN}",
           "certificates": [
             {
-              "certificateFile": "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem",
-              "keyFile": "/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
+              "certificateFile": "${CERT_FILE}",
+              "keyFile": "${KEY_FILE}"
             }
-          ]
+          ],
+          "alpn": ${ALPN_JSON},
+          "fingerprint": "${FINGERPRINT}"
         },
         "wsSettings": {
-          "path": "${WS_PATH}"
+          "path": "${WS_PATH}",
+          "headers": {
+            "Host": "${DOMAIN}"
+          }
         }
       }
     }
@@ -443,35 +758,11 @@ generate_config() {
   ]
 }
 EOF
-    
-    # Verify JSON
-    if ! jq empty "$XRAY_CONFIG_FILE" 2>/dev/null; then
-        if ! python3 -c "import json; json.load(open('$XRAY_CONFIG_FILE'))" 2>/dev/null; then
-            print_warning "Could not validate JSON syntax"
-        fi
-    fi
-    
-    # Save client info
-    mkdir -p "$(dirname "$CLIENTS_FILE")"
-    echo "# Xray Clients - $(date)" > "$CLIENTS_FILE"
-    echo "Xray-Edge-Tunnel github|$UUID|Default Client|$(date +%Y-%m-%d)" >> "$CLIENTS_FILE"
-    
-    print_msg "Configuration created"
 }
 
 # Start Xray service
 start_xray() {
     print_info "Starting Xray..."
-    
-    # Verify certificate permissions before starting
-    # Fix permission denied error for SSL certs
-    if [[ -d "/etc/letsencrypt/live/$DOMAIN" ]]; then
-        print_info "Adjusting certificate permissions..."
-        chmod -R 755 /etc/letsencrypt/live/
-        chmod -R 755 /etc/letsencrypt/archive/
-        chmod 644 "/etc/letsencrypt/live/$DOMAIN/fullchain.pem"
-        chmod 644 "/etc/letsencrypt/live/$DOMAIN/privkey.pem"
-    fi
     
     # Test configuration before starting
     print_info "Testing configuration..."
@@ -519,18 +810,37 @@ generate_links() {
     
     [[ ! -f "$CLIENTS_FILE" ]] && { print_error "No clients found"; return 1; }
     
-    ENCODED_PATH=$(printf '%s' "$WS_PATH" | jq -sRr @uri)
-    
     echo ""
     echo -e "${GREEN}╔═══════════════════════════════════════════════════════════╗${NC}"
     echo -e "${GREEN}║              Connection Links & Details                   ║${NC}"
     echo -e "${GREEN}╚═══════════════════════════════════════════════════════════╝${NC}"
     echo ""
     
-    while IFS='|' read -r name uuid desc date; do
+    # Use CDN_HOST as main address (like chatgpt.com)
+    # Domain is only used for host and SNI headers
+    CONNECT_ADDRESS="$CDN_HOST"
+    
+    while IFS='|' read -r name uuid desc date transport; do
         [[ "$name" == "#"* ]] && continue
         
-        VLESS_LINK="vless://${uuid}@${CDN_HOST}:${PORT}?type=ws&security=tls&path=${ENCODED_PATH}&host=${DOMAIN}&sni=${DOMAIN}#${name}"
+        # Use saved transport or default to current
+        [[ -z "$transport" ]] && transport="$TRANSPORT"
+        
+        if [[ "$transport" == "xhttp" ]]; then
+            # URL encode the path for xhttp
+            ENCODED_PATH=$(printf '%s' "$XHTTP_PATH" | jq -sRr @uri)
+            # URL encode alpn (replace comma with %2C)
+            ENCODED_ALPN=$(printf '%s' "$ALPN" | sed 's/,/%2C/g')
+            # For xhttp: address=CDN, host=domain, sni=domain
+            VLESS_LINK="vless://${uuid}@${CONNECT_ADDRESS}:${PORT}?type=xhttp&security=tls&path=${ENCODED_PATH}&host=${DOMAIN}&sni=${DOMAIN}&fp=${FINGERPRINT}&alpn=${ENCODED_ALPN}&mode=${XHTTP_MODE}#${name}"
+        else
+            # URL encode the path for websocket
+            ENCODED_PATH=$(printf '%s' "$WS_PATH" | jq -sRr @uri)
+            # URL encode alpn
+            ENCODED_ALPN=$(printf '%s' "$ALPN" | sed 's/,/%2C/g')
+            # For ws: address=CDN, host=domain, sni=domain
+            VLESS_LINK="vless://${uuid}@${CONNECT_ADDRESS}:${PORT}?type=ws&security=tls&path=${ENCODED_PATH}&host=${DOMAIN}&sni=${DOMAIN}&fp=${FINGERPRINT}&alpn=${ENCODED_ALPN}#${name}"
+        fi
         
         echo -e "${CYAN}Client:${NC} $name"
         echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -541,13 +851,20 @@ generate_links() {
     done < "$CLIENTS_FILE"
     
     echo -e "${YELLOW}Manual Settings:${NC}"
-    echo -e "Address:     ${GREEN}$CDN_HOST${NC}"
+    echo -e "Address:     ${GREEN}$CONNECT_ADDRESS${NC} (CDN Host)"
     echo -e "Port:        ${GREEN}$PORT${NC}"
-    echo -e "Network:     ${GREEN}ws${NC}"
-    echo -e "Path:        ${GREEN}$WS_PATH${NC}"
-    echo -e "Host:        ${GREEN}$DOMAIN${NC}"
+    echo -e "Transport:   ${GREEN}$TRANSPORT${NC}"
+    if [[ "$TRANSPORT" == "xhttp" ]]; then
+        echo -e "Path:        ${GREEN}$XHTTP_PATH${NC}"
+        echo -e "Mode:        ${GREEN}$XHTTP_MODE${NC}"
+    else
+        echo -e "Path:        ${GREEN}$WS_PATH${NC}"
+    fi
+    echo -e "Host:        ${GREEN}$DOMAIN${NC} (Your Domain)"
     echo -e "TLS:         ${GREEN}Enable${NC}"
     echo -e "SNI:         ${GREEN}$DOMAIN${NC}"
+    echo -e "ALPN:        ${GREEN}$ALPN${NC}"
+    echo -e "Fingerprint: ${GREEN}$FINGERPRINT${NC}"
     echo ""
 }
 
@@ -568,14 +885,25 @@ add_client() {
         mv "${XRAY_CONFIG_FILE}.tmp" "$XRAY_CONFIG_FILE"
     
     # Add to clients list
-    echo "$CLIENT_NAME|$CLIENT_UUID|Added via script|$(date +%Y-%m-%d)" >> "$CLIENTS_FILE"
+    echo "$CLIENT_NAME|$CLIENT_UUID|Added via script|$(date +%Y-%m-%d)|$TRANSPORT" >> "$CLIENTS_FILE"
     
     systemctl restart xray
     
     print_msg "Client added: $CLIENT_NAME"
     
-    ENCODED_PATH=$(printf '%s' "$WS_PATH" | jq -sRr @uri)
-    VLESS_LINK="vless://${CLIENT_UUID}@${CDN_HOST}:${PORT}?type=ws&security=tls&path=${ENCODED_PATH}&host=${DOMAIN}&sni=${DOMAIN}#${CLIENT_NAME}"
+    # Use CDN_HOST as main address
+    CONNECT_ADDRESS="$CDN_HOST"
+    
+    # Generate link
+    if [[ "$TRANSPORT" == "xhttp" ]]; then
+        ENCODED_PATH=$(printf '%s' "$XHTTP_PATH" | jq -sRr @uri)
+        ENCODED_ALPN=$(printf '%s' "$ALPN" | sed 's/,/%2C/g')
+        VLESS_LINK="vless://${CLIENT_UUID}@${CONNECT_ADDRESS}:${PORT}?type=xhttp&security=tls&path=${ENCODED_PATH}&host=${DOMAIN}&sni=${DOMAIN}&fp=${FINGERPRINT}&alpn=${ENCODED_ALPN}&mode=${XHTTP_MODE}#${CLIENT_NAME}"
+    else
+        ENCODED_PATH=$(printf '%s' "$WS_PATH" | jq -sRr @uri)
+        ENCODED_ALPN=$(printf '%s' "$ALPN" | sed 's/,/%2C/g')
+        VLESS_LINK="vless://${CLIENT_UUID}@${CONNECT_ADDRESS}:${PORT}?type=ws&security=tls&path=${ENCODED_PATH}&host=${DOMAIN}&sni=${DOMAIN}&fp=${FINGERPRINT}&alpn=${ENCODED_ALPN}#${CLIENT_NAME}"
+    fi
     
     echo ""
     echo -e "${GREEN}Connection Link:${NC}"
@@ -594,7 +922,7 @@ remove_client() {
     local i=1
     declare -A client_map
     
-    while IFS='|' read -r name uuid desc date; do
+    while IFS='|' read -r name uuid desc date transport; do
         [[ "$name" == "#"* ]] && continue
         echo -e "${GREEN}$i)${NC} $name (Created: $date)"
         client_map[$i]="$name|$uuid"
@@ -608,7 +936,7 @@ remove_client() {
     
     IFS='|' read -r del_name del_uuid <<< "${client_map[$choice]}"
     
-    if [[ "$del_name" == "Xray-Edge-Tunnel github" ]]; then
+    if [[ "$del_name" == "Xray-Edge-Tunnel" ]]; then
         print_error "Cannot remove default client"
         return 1
     fi
@@ -636,12 +964,13 @@ list_clients() {
     echo -e "${CYAN}╚═══════════════════════════════════════════════════════════╝${NC}"
     echo ""
     
-    printf "%-20s %-40s %-15s\n" "Name" "UUID" "Created"
-    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    printf "%-20s %-40s %-15s %-10s\n" "Name" "UUID" "Created" "Transport"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     
-    while IFS='|' read -r name uuid desc date; do
+    while IFS='|' read -r name uuid desc date transport; do
         [[ "$name" == "#"* ]] && continue
-        printf "%-20s %-40s %-15s\n" "$name" "$uuid" "$date"
+        [[ -z "$transport" ]] && transport="ws"
+        printf "%-20s %-40s %-15s %-10s\n" "$name" "$uuid" "$date" "$transport"
     done < "$CLIENTS_FILE"
     
     echo ""
