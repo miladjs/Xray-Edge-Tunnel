@@ -4,21 +4,26 @@
 
 This script automates the installation and configuration of Xray (VLESS-WebSocket-TLS) with Cloudflare CDN support. It sets up a secure and fast proxy server designed to bypass censorship using CDN capabilities.
 
+## 🚀 Major Update (Full Manager)
+
+> **New Features (Full Manager):**
+> - **Full Management Menu**: Interactive menu for easy management (Install, Remove, Logs, etc.).
+> - **xhttp Protocol Support**: Latest and most stable protocol for bypassing restrictions.
+> - **User Management**: Add, remove, and list users with dedicated UUIDs.
+> - **Advanced Settings**: Select **ALPN** (h2/http1.1) and **Fingerprint** (Chrome, Firefox, Safari).
+> - **Service Management**: Start, stop, restart, and view service status from the script.
+> - **Bug Fixes**: Fixed SSL file permission issues (running as root).
+
 ## ✨ Features
 
-- **Automated Installation**: Installs Xray, Certbot, and other dependencies automatically.
-- **SSL Certificate**: Automatically obtains a free Let's Encrypt SSL certificate.
-- **Auto-Renewal**: Configures automatic renewal for SSL certificates via cron hooks.
-- **CDN Support**: Configured to work with Cloudflare CDN (WebSocket + TLS).
-- **Interactive Setup**:
-    - **DNS Verification**: Automatically checks if your domain points to the server IP (IPv4 & IPv6).
-    - **Port Conflict Detection**: Ensures the selected port is available before installation.
-    - **System Checks**: Verifies OS compatibility and internet connectivity.
-- **Custom Configuration**:
-    - **Custom WebSocket Path**: Choose your own path (default: `/graphql`).
-    - **Custom CDN Host**: Set your preferred CDN host (default: `chatgpt.com`).
-    - **Custom Ports**: Choose from Cloudflare-supported HTTPS ports (443, 2053, 2083, 2087, 2096, 8443).
-- **Client Link Generation**: Generates VLESS connection links (share links) for easy import into V2rayN, v2rayNG, etc.
+- **Automated Install & Manage**: Install Xray, Certbot, and manage the service via menu.
+- **Free SSL Certificate**: Auto-obtain valid Let's Encrypt SSL with fallback support.
+- **Multi-Protocol**: Supports **xhttp** (Recommended) and legacy **WebSocket**.
+- **High Security**: Advanced TLS settings, Fingerprint, and ALPN selection.
+- **User Management**: Multiple user management system with dedicated links.
+- **Smart Setup**:
+    - **DNS Check**: Auto-check domain to server IP connection (IPv4 & IPv6).
+    - **System Check**: OS compatibility and internet connection check.
 
 ## 📋 Prerequisites
 
